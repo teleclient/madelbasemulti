@@ -1,0 +1,19 @@
+config.php
+
+vendor/
+composer.lock
+node_modules/
+npm-debug.log
+.vscode/
+nbproject/
+
+
+# MadelineProto specific
+*.phar
+*.madeline
+*.lock
+*.log
+madeline.php
+madeline.phar.version
+
+multiamir.php
