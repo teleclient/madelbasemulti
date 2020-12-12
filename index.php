@@ -7,6 +7,7 @@ use danog\MadelineProto\API;
 use danog\MadelineProto\EventHandler;
 use danog\MadelineProto\Exception;
 use danog\MadelineProto\Logger;
+use danog\MadelineProto\Tools;
 use danog\MadelineProto\RPCErrorException;
 
 /*
@@ -20,6 +21,8 @@ if (\file_exists('vendor/autoload.php')) {
     }
     include 'madeline.php';
 }
+include 'config.php';
+
 
 /**
  * Event handler class.
@@ -59,26 +62,10 @@ class MyEventHandler extends EventHandler
      */
     public function onUpdateNewMessage(array $update): \Generator
     {
-        //if ($update['message']['_'] === 'messageEmpty' || $update['message']['out'] ?? false) {
-        //    return;
-        //}
-        $res = \json_encode($update, JSON_PRETTY_PRINT);
+        $res = \json_encode($update, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
 
         try {
-            yield $this->messages->sendMessage([
-                'peer' => $update,
-                'message'         => "<code>$res</code>",
-                'reply_to_msg_id' => $update['message']['id'] ?? null,
-                'parse_mode'      => 'HTML']);
-            if (isset($update['message']['media']) &&
-                $update['message']['media']['_'] !== 'messageMediaGame')
-            {
-                yield $this->messages->sendMedia([
-                    'peer'    => $update,
-                    'message' => $update['message']['message'],
-                    'media'   => $update
-                ]);
-            }
+            yield $this->logger($res);
         } catch (RPCErrorException $e) {
             $this->report("Surfaced: $e");
         } catch (Exception $e) {
@@ -89,14 +76,42 @@ class MyEventHandler extends EventHandler
     }
 }
 
-$MadelineProtos = [];
-foreach ([
-     'bot.madeline'  => 'Bot Login',
-    'user.madeline'  => 'Userbot login',
-    'user2.madeline' => 'Userbot login (2)'
-] as $session => $message) {
-    Logger::log($message, Logger::WARNING);
-    $MadelineProtos []= new API($session);
+
+function startAndLoopAsync($mp): \Generator
+{
+    $mp->async(true);
+    yield $mp->start();
+    yield $mp->setEventHandler(MyEventHandler::class);
+    return yield from $mp->API->loop();
 }
 
-API::startAndLoopMulti($MadelineProtos, MyEventHandler::class);
+if(file_exists('MadelineProto.log')) unlink('MadelineProto.log');
+$settings['logger']['logger_level']   = Logger::ULTRA_VERBOSE;
+$settings['logger']['logger']         = Logger::FILE_LOGGER;
+$userSettings['app_info']['api_id']   = $GLOBALS["API_ID"];
+$userSettings['app_info']['api_hash'] = $GLOBALS["API_HASH"];
+var_export(array_merge($settings, $userSettings));
+
+echo('User1'.PHP_EOL);
+$mps[0] = new API('user.madeline', array_merge($settings, $userSettings));
+
+echo('Bot1'.PHP_EOL);
+$mps[1] = new API('bot.madeline', $settings);
+
+//while (true) {
+    try {
+        $mps[0]->echo('User'.PHP_EOL);
+        $mps[0]->start(['async' => false]);
+        $promises[0] = startAndLoopAsync($mps[0]);
+
+        $mps[1]->echo('Bot'.PHP_EOL);
+        $mps[1]->botLogin($GLOBALS["BOT_TOKEN"]);
+        $mps[1]->start(['async' => false]);
+        $promises[1] = startAndLoopAsync($mps[1]);
+
+        Tools::wait(Tools::all($promises));
+    } catch (\Throwable $e) {
+        $mps[0]->logger((string) $e, Logger::FATAL_ERROR);
+        $mps[0]->report("Surfaced: $e");
+    }
+//}
